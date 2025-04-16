@@ -1,295 +1,1057 @@
+-- CyberCloud UI Creator
+local UICreator = {}
 
-local HexUI = {}
+-- Global references
+local screenGui = nil
+local isUIVisible = true
+local settingsFilePath = "cybercloud_settings.json"
+local settings = {
+    toggles = {},
+    sliders = {},
+    colors = {},
+    keybinds = {},
+    dropdowns = {}
+}
 
-function HexUI:CreateWindow(title)
-    local window = {}
-    local tabs = {}
+-- Universeller Speichermechanismus, der auf allen Executors funktioniert
+local function saveSettings()
+    -- Aktuelle Einstellungen sammeln
+    local data = game:GetService("HttpService"):JSONEncode(settings)
     
-    -- Create GUI elements
+    -- Mehrere Speichermethoden versuchen, ohne Fehler in der Konsole
+    local success = false
+    
+    -- 1. Standard-Methode
+    pcall(function()
+        if writefile then
+            writefile(settingsFilePath, data)
+            success = true
+        end
+    end)
+    
+    -- 2. Synapse
+    if not success then
+        pcall(function()
+            if syn and syn.write_file then
+                syn.write_file(settingsFilePath, data)
+                success = true
+            end
+        end)
+    end
+    
+    -- 3. Mobile Executors
+    if not success then
+        pcall(function()
+            if Delta and Delta.SaveFile then
+                Delta.SaveFile(settingsFilePath, data)
+                success = true
+            elseif fluxus and fluxus.writefile then
+                fluxus.writefile(settingsFilePath, data)
+                success = true
+            end
+        end)
+    end
+    
+    -- 4. Andere Executors
+    if not success then
+        pcall(function()
+            if getgenv().workspace then
+                getgenv().workspace.CyberCloudSettings = data
+                success = true
+            end
+        end)
+    end
+    
+    return success
+end
+
+-- Universeller Lademechanismus für alle Executors
+local function loadSettings()
+    local content = nil
+    local success = false
+    
+    -- 1. Standard-Methode
+    pcall(function()
+        if isfile and isfile(settingsFilePath) then
+            content = readfile(settingsFilePath)
+            success = true
+        end
+    end)
+    
+    -- 2. Synapse
+    if not success then
+        pcall(function()
+            if syn and syn.read_file and syn.io_exists and syn.io_exists(settingsFilePath) then
+                content = syn.read_file(settingsFilePath)
+                success = true
+            end
+        end)
+    end
+    
+    -- 3. Mobile Executors
+    if not success then
+        pcall(function()
+            if Delta and Delta.LoadFile then
+                content = Delta.LoadFile(settingsFilePath)
+                success = true
+            elseif fluxus and fluxus.readfile and fluxus.isfile and fluxus.isfile(settingsFilePath) then
+                content = fluxus.readfile(settingsFilePath)
+                success = true
+            end
+        end)
+    end
+    
+    -- 4. Andere Executors
+    if not success then
+        pcall(function()
+            if getgenv().workspace and getgenv().workspace.CyberCloudSettings then
+                content = getgenv().workspace.CyberCloudSettings
+                success = true
+            end
+        end)
+    end
+    
+    -- Daten verarbeiten, wenn erfolgreich geladen
+    if success and content then
+        local parsed = nil
+        pcall(function()
+            parsed = game:GetService("HttpService"):JSONDecode(content)
+        end)
+        
+        if parsed then
+            settings = parsed
+            return true
+        end
+    end
+    
+    return false
+end
+
+-- Make a frame draggable (only from the specified drag element)
+local function makeDraggable(frame, dragElement)
     local UserInputService = game:GetService("UserInputService")
-    local gui = Instance.new("ScreenGui")
-    local mainFrame = Instance.new("Frame")
-    local scrollFrame = Instance.new("ScrollingFrame")
-    local titleBar = Instance.new("Frame")
-    local titleText = Instance.new("TextLabel")
+    local dragToggle, dragInput, dragStart, startPos
     
-    -- Set up main frame
-    mainFrame.Name = "MainFrame"
-    mainFrame.Position = UDim2.new(0.5, -150, 0.5, -200)
-    mainFrame.Size = UDim2.new(0, 300, 0, 400)
-    mainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-    mainFrame.BorderSizePixel = 0
-    mainFrame.Parent = gui
+    local function updateInput(input)
+        local delta = input.Position - dragStart
+        frame.Position = UDim2.new(
+            startPos.X.Scale, 
+            startPos.X.Offset + delta.X, 
+            startPos.Y.Scale, 
+            startPos.Y.Offset + delta.Y
+        )
+    end
     
-    -- Set up title bar
-    titleBar.Name = "TitleBar"
-    titleBar.Size = UDim2.new(1, 0, 0, 30)
-    titleBar.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-    titleBar.BorderSizePixel = 0
-    titleBar.Parent = mainFrame
-    
-    titleText.Name = "Title"
-    titleText.Size = UDim2.new(1, 0, 1, 0)
-    titleText.BackgroundTransparency = 1
-    titleText.Text = title
-    titleText.TextColor3 = Color3.fromRGB(255, 255, 255)
-    titleText.Font = Enum.Font.SourceSansBold
-    titleText.TextSize = 16
-    titleText.Parent = titleBar
-    
-    -- Set up scrolling frame
-    scrollFrame.Name = "Content"
-    scrollFrame.Position = UDim2.new(0, 0, 0, 30)
-    scrollFrame.Size = UDim2.new(1, 0, 1, -30)
-    scrollFrame.BackgroundTransparency = 1
-    scrollFrame.ScrollBarThickness = 4
-    scrollFrame.ScrollingEnabled = true
-    scrollFrame.Parent = mainFrame
-    
-    -- Dragging functionality
-    local dragging = false
-    local dragStart
-    local startPos
-    
-    titleBar.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            dragging = true
+    dragElement.InputBegan:Connect(function(input)
+        if (input.UserInputType == Enum.UserInputType.MouseButton1 or
+            input.UserInputType == Enum.UserInputType.Touch) then
+            dragToggle = true
             dragStart = input.Position
-            startPos = mainFrame.Position
+            startPos = frame.Position
+            
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragToggle = false
+                end
+            end)
+        end
+    end)
+    
+    dragElement.InputChanged:Connect(function(input)
+        if (input.UserInputType == Enum.UserInputType.MouseMovement or
+            input.UserInputType == Enum.UserInputType.Touch) and dragToggle then
+            dragInput = input
         end
     end)
     
     UserInputService.InputChanged:Connect(function(input)
-        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-            local delta = input.Position - dragStart
-            mainFrame.Position = UDim2.new(
-                startPos.X.Scale,
-                startPos.X.Offset + delta.X,
-                startPos.Y.Scale,
-                startPos.Y.Offset + delta.Y
-            )
+        if input == dragInput and dragToggle then
+            updateInput(input)
+        end
+    end)
+end
+
+-- Function to toggle UI visibility
+local function toggleUI(show)
+    if not screenGui then return end
+    
+    isUIVisible = show
+    
+    -- Get references to the main components
+    local mainFrame = screenGui:FindFirstChild("MainFrame")
+    local hexButton = screenGui:FindFirstChild("HexButton")
+    
+    if mainFrame then
+        mainFrame.Visible = show
+    end
+    
+    if hexButton then
+        hexButton.Visible = not show -- Show hex button when UI is hidden
+    end
+end
+
+-- Create a toggle item with optional settings gear
+local function createToggleItem(parent, name, index, enabled, hasSettings)
+    local yPos = 25 + (index * 22)
+    
+    local itemFrame = Instance.new("Frame")
+    itemFrame.Name = name.."Item"
+    itemFrame.Size = UDim2.new(1, 0, 0, 22)
+    itemFrame.Position = UDim2.new(0, 0, 0, yPos)
+    itemFrame.BackgroundTransparency = 1
+    itemFrame.Parent = parent
+    
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Name = "NameLabel"
+    nameLabel.Size = UDim2.new(0.65, 0, 1, 0)
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Font = Enum.Font.SourceSans
+    nameLabel.TextSize = 14
+    nameLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+    nameLabel.Text = name
+    nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+    nameLabel.Parent = itemFrame
+    
+    if hasSettings then
+        local settingsButton = Instance.new("ImageButton")
+        settingsButton.Name = "SettingsButton"
+        settingsButton.Size = UDim2.new(0, 16, 0, 16)
+        settingsButton.Position = UDim2.new(0.65, 5, 0.5, -8)
+        settingsButton.BackgroundTransparency = 1
+        settingsButton.Image = "rbxassetid://3926307971"
+        settingsButton.ImageRectOffset = Vector2.new(324, 124)
+        settingsButton.ImageRectSize = Vector2.new(36, 36)
+        settingsButton.ImageColor3 = Color3.fromRGB(200, 200, 200)
+        settingsButton.Parent = itemFrame
+    end
+    
+    local toggleFrame = Instance.new("Frame")
+    toggleFrame.Name = "ToggleFrame"
+    toggleFrame.Size = UDim2.new(0, 16, 0, 16)
+    toggleFrame.Position = UDim2.new(1, -20, 0.5, -8)
+    toggleFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    toggleFrame.BorderSizePixel = 0
+    toggleFrame.Parent = itemFrame
+    
+    local toggleCorner = Instance.new("UICorner")
+    toggleCorner.CornerRadius = UDim.new(1, 0)
+    toggleCorner.Parent = toggleFrame
+    
+    local toggleIndicator = Instance.new("Frame")
+    toggleIndicator.Name = "Indicator"
+    toggleIndicator.Size = UDim2.new(0, 10, 0, 10)
+    toggleIndicator.Position = UDim2.new(0.5, -5, 0.5, -5)
+    toggleIndicator.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    toggleIndicator.BorderSizePixel = 0
+    toggleIndicator.Visible = enabled
+    toggleIndicator.Parent = toggleFrame
+    
+    local indicatorCorner = Instance.new("UICorner")
+    indicatorCorner.CornerRadius = UDim.new(1, 0)
+    indicatorCorner.Parent = toggleIndicator
+    
+    -- Make toggle area bigger for better touch detection
+    local toggleButton = Instance.new("TextButton")
+    toggleButton.Name = "ToggleButton"
+    toggleButton.Size = UDim2.new(0, 30, 0, 22)
+    toggleButton.Position = UDim2.new(1, -30, 0, 0)
+    toggleButton.BackgroundTransparency = 1
+    toggleButton.Text = ""
+    toggleButton.Parent = itemFrame
+    
+    -- Click handler
+    toggleButton.MouseButton1Click:Connect(function()
+        toggleIndicator.Visible = not toggleIndicator.Visible
+        
+        -- Update the settings table when a toggle is clicked
+        local itemName = string.gsub(itemFrame.Name, "Item$", "")
+        settings.toggles[itemName] = toggleIndicator.Visible
+    end)
+end
+
+-- Create a keybind item
+local function createKeybindItem(parent, name, index, key)
+    local yPos = 25 + (index * 22)
+    
+    local itemFrame = Instance.new("Frame")
+    itemFrame.Name = name.."Item"
+    itemFrame.Size = UDim2.new(1, 0, 0, 22)
+    itemFrame.Position = UDim2.new(0, 0, 0, yPos)
+    itemFrame.BackgroundTransparency = 1
+    itemFrame.Parent = parent
+    
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Name = "NameLabel"
+    nameLabel.Size = UDim2.new(0.65, 0, 1, 0)
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Font = Enum.Font.SourceSans
+    nameLabel.TextSize = 14
+    nameLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+    nameLabel.Text = name
+    nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+    nameLabel.Parent = itemFrame
+    
+    local keyButton = Instance.new("TextButton")
+    keyButton.Name = "KeyButton"
+    keyButton.Size = UDim2.new(0, 20, 0, 20)
+    keyButton.Position = UDim2.new(1, -20, 0.5, -10)
+    keyButton.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    keyButton.BorderSizePixel = 0
+    keyButton.Font = Enum.Font.SourceSansBold
+    keyButton.TextSize = 14
+    keyButton.TextColor3 = Color3.fromRGB(200, 200, 200)
+    keyButton.Text = key
+    keyButton.Parent = itemFrame
+    
+    local buttonCorner = Instance.new("UICorner")
+    buttonCorner.CornerRadius = UDim.new(0, 4)
+    buttonCorner.Parent = keyButton
+    
+    -- Update settings when the keybind is changed
+    local function updateKeybind(newKey)
+        keyButton.Text = newKey
+        local itemName = string.gsub(itemFrame.Name, "Item$", "")
+        settings.keybinds[itemName] = newKey
+    end
+    
+    -- Keybind change logic
+    local isChanging = false
+    keyButton.MouseButton1Click:Connect(function()
+        if isChanging then return end
+        
+        isChanging = true
+        keyButton.Text = "..."
+        
+        local connection
+        connection = game:GetService("UserInputService").InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.Keyboard then
+                local keyName = input.KeyCode.Name
+                updateKeybind(keyName)
+                isChanging = false
+                connection:Disconnect()
+            end
+        end)
+    end)
+end
+
+-- Create a color item
+local function createColorItem(parent, name, index, color)
+    local yPos = 25 + (index * 22)
+    
+    local itemFrame = Instance.new("Frame")
+    itemFrame.Name = name.."Item"
+    itemFrame.Size = UDim2.new(1, 0, 0, 22)
+    itemFrame.Position = UDim2.new(0, 0, 0, yPos)
+    itemFrame.BackgroundTransparency = 1
+    itemFrame.Parent = parent
+    
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Name = "NameLabel"
+    nameLabel.Size = UDim2.new(0.65, 0, 1, 0)
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Font = Enum.Font.SourceSans
+    nameLabel.TextSize = 14
+    nameLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+    nameLabel.Text = name
+    nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+    nameLabel.Parent = itemFrame
+    
+    local colorFrame = Instance.new("Frame")
+    colorFrame.Name = "ColorFrame"
+    colorFrame.Size = UDim2.new(0, 16, 0, 16)
+    colorFrame.Position = UDim2.new(1, -20, 0.5, -8)
+    colorFrame.BorderSizePixel = 0
+    colorFrame.Parent = itemFrame
+    
+    -- Unterstützung für gespeicherte Farben als Tabellen
+    if type(color) == "table" and color.R then
+        colorFrame.BackgroundColor3 = Color3.new(color.R, color.G, color.B)
+    else
+        colorFrame.BackgroundColor3 = color
+    end
+    
+    local colorCorner = Instance.new("UICorner")
+    colorCorner.CornerRadius = UDim.new(0, 4)
+    colorCorner.Parent = colorFrame
+    
+    -- Make clickable area larger
+    local colorButton = Instance.new("TextButton")
+    colorButton.Name = "ColorButton"
+    colorButton.Size = UDim2.new(0, 30, 0, 22)
+    colorButton.Position = UDim2.new(1, -30, 0, 0)
+    colorButton.BackgroundTransparency = 1
+    colorButton.Text = ""
+    colorButton.Parent = itemFrame
+    
+    -- Update settings when color changes
+    local function updateColor(newColor)
+        colorFrame.BackgroundColor3 = newColor
+        local itemName = string.gsub(itemFrame.Name, "Item$", "")
+        settings.colors[itemName] = {
+            R = newColor.R,
+            G = newColor.G,
+            B = newColor.B
+        }
+    end
+    
+    -- Click handler for color selection (simplified)
+    colorButton.MouseButton1Click:Connect(function()
+        -- In a real implementation, this would open a color picker
+        -- For this example, we'll just cycle through some preset colors
+        local colors = {
+            Color3.fromRGB(255, 0, 0),    -- Red
+            Color3.fromRGB(255, 255, 0),  -- Yellow
+            Color3.fromRGB(0, 255, 0),    -- Green
+            Color3.fromRGB(0, 255, 255),  -- Cyan
+            Color3.fromRGB(0, 0, 255),    -- Blue
+            Color3.fromRGB(255, 0, 255)   -- Magenta
+        }
+        
+        -- Find current color index
+        local currentIndex = 1
+        local currentColor = colorFrame.BackgroundColor3
+        local minDist = math.huge
+        
+        for i, c in ipairs(colors) do
+            local dist = math.abs(c.R - currentColor.R) + 
+                        math.abs(c.G - currentColor.G) + 
+                        math.abs(c.B - currentColor.B)
+            if dist < minDist then
+                minDist = dist
+                currentIndex = i
+            end
+        end
+        
+        -- Move to next color
+        currentIndex = (currentIndex % #colors) + 1
+        updateColor(colors[currentIndex])
+    end)
+end
+
+-- Create a slider item
+local function createSliderItem(parent, name, index, value)
+    local yPos = 25 + (index * 22)
+    
+    local itemFrame = Instance.new("Frame")
+    itemFrame.Name = name.."Item"
+    itemFrame.Size = UDim2.new(1, 0, 0, 22)
+    itemFrame.Position = UDim2.new(0, 0, 0, yPos)
+    itemFrame.BackgroundTransparency = 1
+    itemFrame.Parent = parent
+    
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Name = "NameLabel"
+    nameLabel.Size = UDim2.new(0.65, 0, 1, 0)
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Font = Enum.Font.SourceSans
+    nameLabel.TextSize = 14
+    nameLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+    nameLabel.Text = name
+    nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+    nameLabel.Parent = itemFrame
+    
+    local sliderBg = Instance.new("Frame")
+    sliderBg.Name = "SliderBackground"
+    sliderBg.Size = UDim2.new(0.35, -5, 0, 6)
+    sliderBg.Position = UDim2.new(0.65, 0, 0.5, -3)
+    sliderBg.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    sliderBg.BorderSizePixel = 0
+    sliderBg.Parent = itemFrame
+    
+    local bgCorner = Instance.new("UICorner")
+    bgCorner.CornerRadius = UDim.new(1, 0)
+    bgCorner.Parent = sliderBg
+    
+    local sliderFill = Instance.new("Frame")
+    sliderFill.Name = "SliderFill"
+    sliderFill.Size = UDim2.new(value, 0, 1, 0)
+    sliderFill.BackgroundColor3 = Color3.fromRGB(255, 255, 0)
+    sliderFill.BorderSizePixel = 0
+    sliderFill.Parent = sliderBg
+    
+    local fillCorner = Instance.new("UICorner")
+    fillCorner.CornerRadius = UDim.new(1, 0)
+    fillCorner.Parent = sliderFill
+    
+    -- Make slider draggable area larger for touch
+    local sliderButton = Instance.new("TextButton")
+    sliderButton.Name = "SliderButton"
+    sliderButton.Size = UDim2.new(0.35, -5, 0, 22)
+    sliderButton.Position = UDim2.new(0.65, 0, 0, 0)
+    sliderButton.BackgroundTransparency = 1
+    sliderButton.Text = ""
+    sliderButton.Parent = itemFrame
+    
+    -- Make slider draggable
+    local UserInputService = game:GetService("UserInputService")
+    local dragging = false
+    
+    -- Update settings when slider changes
+    local function updateSliderValue(relativePos)
+        sliderFill.Size = UDim2.new(relativePos, 0, 1, 0)
+        local itemName = string.gsub(itemFrame.Name, "Item$", "")
+        settings.sliders[itemName] = relativePos
+    end
+    
+    local function updateSlider(input)
+        local sliderPos = sliderBg.AbsolutePosition
+        local sliderSize = sliderBg.AbsoluteSize
+        local relativePos = (input.Position.X - sliderPos.X) / sliderSize.X
+        relativePos = math.clamp(relativePos, 0, 1)
+        updateSliderValue(relativePos)
+    end
+    
+    sliderButton.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or 
+           input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            updateSlider(input)
         end
     end)
     
-    UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+    sliderButton.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or
+           input.UserInputType == Enum.UserInputType.Touch then
             dragging = false
         end
     end)
     
-    gui.Parent = game.Players.LocalPlayer:WaitForChild("PlayerGui")
-    
-    -- Create a new tab
-    function window:CreateTab(name)
-        local tab = {}
-        local sections = {}
-        
-        -- Create a section in the tab
-        function tab:CreateSection(name)
-            local section = {}
-            local sectionFrame = Instance.new("Frame")
-            local sectionTitle = Instance.new("TextLabel")
-            local contentFrame = Instance.new("Frame")
-            
-            sectionFrame.Name = name
-            sectionFrame.Size = UDim2.new(1, -20, 0, 100)
-            sectionFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-            sectionFrame.BorderSizePixel = 0
-            sectionFrame.Position = UDim2.new(0, 10, 0, (#sections * 110) + 10)
-            sectionFrame.Parent = scrollFrame
-            
-            sectionTitle.Name = "Title"
-            sectionTitle.Size = UDim2.new(1, 0, 0, 20)
-            sectionTitle.BackgroundTransparency = 1
-            sectionTitle.Text = name
-            sectionTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
-            sectionTitle.Font = Enum.Font.SourceSansBold
-            sectionTitle.TextSize = 14
-            sectionTitle.Parent = sectionFrame
-            
-            contentFrame.Name = "Content"
-            contentFrame.Position = UDim2.new(0, 0, 0, 25)
-            contentFrame.Size = UDim2.new(1, 0, 1, -25)
-            contentFrame.BackgroundTransparency = 1
-            contentFrame.Parent = sectionFrame
-            
-            function section:AddTextBox(text, defaultText, callback)
-                local container = Instance.new("Frame")
-                container.Size = UDim2.new(1, -20, 0, 30)
-                container.Position = UDim2.new(0, 10, 0, (#contentFrame:GetChildren() * 35))
-                container.BackgroundTransparency = 1
-                container.Parent = contentFrame
-
-                local label = Instance.new("TextLabel")
-                label.Size = UDim2.new(0.3, 0, 1, 0)
-                label.BackgroundTransparency = 1
-                label.Text = text
-                label.TextColor3 = Color3.fromRGB(255, 255, 255)
-                label.TextXAlignment = Enum.TextXAlignment.Left
-                label.Parent = container
-
-                local textBox = Instance.new("TextBox")
-                textBox.Size = UDim2.new(0.7, 0, 1, -10)
-                textBox.Position = UDim2.new(0.3, 0, 0, 5)
-                textBox.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-                textBox.BorderSizePixel = 0
-                textBox.TextColor3 = Color3.fromRGB(255, 255, 255)
-                textBox.Text = defaultText
-                textBox.Parent = container
-
-                textBox.FocusLost:Connect(function()
-                    callback(textBox.Text)
-                end)
-
-                return textBox
-            end
-
-            function section:AddButton(text, callback)
-                local button = Instance.new("TextButton")
-                button.Size = UDim2.new(1, -20, 0, 30)
-                button.Position = UDim2.new(0, 10, 0, (#contentFrame:GetChildren() * 35))
-                button.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-                button.BorderSizePixel = 0
-                button.Text = text
-                button.TextColor3 = Color3.fromRGB(255, 255, 255)
-                button.Parent = contentFrame
-
-                button.MouseButton1Click:Connect(callback)
-                return button
-            end
-            
-            function section:AddToggle(text, default, callback)
-                local container = Instance.new("Frame")
-                container.Size = UDim2.new(1, -20, 0, 30)
-                container.Position = UDim2.new(0, 10, 0, (#contentFrame:GetChildren() * 35))
-                container.BackgroundTransparency = 1
-                container.Parent = contentFrame
-
-                local toggle = Instance.new("TextButton")
-                toggle.Size = UDim2.new(0, 20, 0, 20)
-                toggle.Position = UDim2.new(0, 0, 0.5, -10)
-                toggle.BackgroundColor3 = default and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0)
-                toggle.BorderSizePixel = 0
-                toggle.Text = ""
-                toggle.Parent = container
-
-                local label = Instance.new("TextLabel")
-                label.Size = UDim2.new(1, -30, 1, 0)
-                label.Position = UDim2.new(0, 30, 0, 0)
-                label.BackgroundTransparency = 1
-                label.Text = text
-                label.TextColor3 = Color3.fromRGB(255, 255, 255)
-                label.TextXAlignment = Enum.TextXAlignment.Left
-                label.Parent = container
-
-                local enabled = default
-                toggle.MouseButton1Click:Connect(function()
-                    enabled = not enabled
-                    toggle.BackgroundColor3 = enabled and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0)
-                    callback(enabled)
-                end)
-
-                return {
-                    Set = function(self, value)
-                        enabled = value
-                        toggle.BackgroundColor3 = enabled and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0)
-                        callback(enabled)
-                    end,
-                    Get = function(self)
-                        return enabled
-                    end
-                }
-            end
-            
-            function section:AddSlider(text, min, max, default, callback)
-                local container = Instance.new("Frame")
-                container.Size = UDim2.new(1, -20, 0, 50)
-                container.Position = UDim2.new(0, 10, 0, (#contentFrame:GetChildren() * 55))
-                container.BackgroundTransparency = 1
-                container.Parent = contentFrame
-
-                local label = Instance.new("TextLabel")
-                label.Size = UDim2.new(1, 0, 0, 20)
-                label.BackgroundTransparency = 1
-                label.Text = text
-                label.TextColor3 = Color3.fromRGB(255, 255, 255)
-                label.TextXAlignment = Enum.TextXAlignment.Left
-                label.Parent = container
-
-                local sliderBack = Instance.new("Frame")
-                sliderBack.Size = UDim2.new(1, 0, 0, 5)
-                sliderBack.Position = UDim2.new(0, 0, 0.7, 0)
-                sliderBack.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-                sliderBack.BorderSizePixel = 0
-                sliderBack.Parent = container
-
-                local sliderFill = Instance.new("Frame")
-                sliderFill.Size = UDim2.new((default - min) / (max - min), 0, 1, 0)
-                sliderFill.BackgroundColor3 = Color3.fromRGB(0, 255, 0)
-                sliderFill.BorderSizePixel = 0
-                sliderFill.Parent = sliderBack
-
-                local valueLabel = Instance.new("TextLabel")
-                valueLabel.Size = UDim2.new(0, 50, 0, 20)
-                valueLabel.Position = UDim2.new(1, -50, 0, 0)
-                valueLabel.BackgroundTransparency = 1
-                valueLabel.Text = tostring(default)
-                valueLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-                valueLabel.Parent = container
-
-                local value = default
-                local dragging = false
-
-                sliderBack.InputBegan:Connect(function(input)
-                    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-                        dragging = true
-                        local relativeX = math.clamp((input.Position.X - sliderBack.AbsolutePosition.X) / sliderBack.AbsoluteSize.X, 0, 1)
-                        value = min + (max - min) * relativeX
-                        sliderFill.Size = UDim2.new(relativeX, 0, 1, 0)
-                        valueLabel.Text = tostring(math.floor(value))
-                        callback(value)
-                    end
-                end)
-
-                UserInputService.InputChanged:Connect(function(input)
-                    if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-                        local relativeX = math.clamp((input.Position.X - sliderBack.AbsolutePosition.X) / sliderBack.AbsoluteSize.X, 0, 1)
-                        value = min + (max - min) * relativeX
-                        sliderFill.Size = UDim2.new(relativeX, 0, 1, 0)
-                        valueLabel.Text = tostring(math.floor(value))
-                        callback(value)
-                    end
-                end)
-
-                UserInputService.InputEnded:Connect(function(input)
-                    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-                        dragging = false
-                    end
-                end)
-
-                return {
-                    Set = function(self, newValue)
-                        value = math.clamp(newValue, min, max)
-                        local relativeX = (value - min) / (max - min)
-                        sliderFill.Size = UDim2.new(relativeX, 0, 1, 0)
-                        valueLabel.Text = tostring(math.floor(value))
-                        callback(value)
-                    end,
-                    Get = function(self)
-                        return value
-                    end
-                }
-            end
-            
-            table.insert(sections, section)
-            return section
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or
+                         input.UserInputType == Enum.UserInputType.Touch) then
+            updateSlider(input)
         end
-        
-        table.insert(tabs, tab)
-        return tab
-    end
-    
-    return window
+    end)
 end
 
-return HexUI
+-- Create a dropdown item
+local function createDropdownItem(parent, name, index, defaultOption)
+    local yPos = 25 + (index * 22)
+    
+    local itemFrame = Instance.new("Frame")
+    itemFrame.Name = name.."Item"
+    itemFrame.Size = UDim2.new(1, 0, 0, 22)
+    itemFrame.Position = UDim2.new(0, 0, 0, yPos)
+    itemFrame.BackgroundTransparency = 1
+    itemFrame.Parent = parent
+    
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Name = "NameLabel"
+    nameLabel.Size = UDim2.new(0.65, 0, 1, 0)
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Font = Enum.Font.SourceSans
+    nameLabel.TextSize = 14
+    nameLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+    nameLabel.Text = name
+    nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+    nameLabel.Parent = itemFrame
+    
+    local dropdownButton = Instance.new("TextButton")
+    dropdownButton.Name = "DropdownButton"
+    dropdownButton.Size = UDim2.new(0.35, -5, 1, -4)
+    dropdownButton.Position = UDim2.new(0.65, 0, 0, 2)
+    dropdownButton.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    dropdownButton.BorderSizePixel = 0
+    dropdownButton.Font = Enum.Font.SourceSans
+    dropdownButton.TextSize = 14
+    dropdownButton.TextColor3 = Color3.fromRGB(200, 200, 200)
+    dropdownButton.Text = defaultOption
+    dropdownButton.TextXAlignment = Enum.TextXAlignment.Center
+    dropdownButton.Parent = itemFrame
+    
+    local buttonCorner = Instance.new("UICorner")
+    buttonCorner.CornerRadius = UDim.new(0, 4)
+    buttonCorner.Parent = dropdownButton
+    
+    -- Update settings when dropdown changes
+    local function updateDropdownValue(newValue)
+        dropdownButton.Text = newValue
+        local itemName = string.gsub(itemFrame.Name, "Item$", "")
+        settings.dropdowns[itemName] = newValue
+    end
+    
+    -- Click handler for dropdown (simplified)
+    dropdownButton.MouseButton1Click:Connect(function()
+        -- In a real implementation, this would open a dropdown menu
+        -- For this example, we'll just cycle through some preset options
+        local options = {
+            "HumanoidRootPart",
+            "Head",
+            "Torso",
+            "Left Arm",
+            "Right Arm",
+            "Left Leg",
+            "Right Leg"
+        }
+        
+        if name == "Type" then
+            options = {"Random", "Normal", "Custom"}
+        end
+        
+        -- Find current option index
+        local currentIndex = 1
+        for i, opt in ipairs(options) do
+            if dropdownButton.Text == opt then
+                currentIndex = i
+                break
+            end
+        end
+        
+        -- Move to next option
+        currentIndex = (currentIndex % #options) + 1
+        updateDropdownValue(options[currentIndex])
+    end)
+end
+
+-- Create a section header item
+local function createHeaderItem(parent, name, index)
+    local yPos = 25 + (index * 22)
+    
+    local headerLabel = Instance.new("TextLabel")
+    headerLabel.Name = name.."Header"
+    headerLabel.Size = UDim2.new(1, 0, 0, 22)
+    headerLabel.Position = UDim2.new(0, 0, 0, yPos)
+    headerLabel.BackgroundTransparency = 1
+    headerLabel.Font = Enum.Font.GothamSemibold
+    headerLabel.TextSize = 14
+    headerLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    headerLabel.Text = name
+    headerLabel.TextXAlignment = Enum.TextXAlignment.Left
+    headerLabel.Parent = parent
+end
+
+-- Function to create the toggle button (hex)
+local function createToggleButton()
+    local toggleButton = Instance.new("TextButton")
+    toggleButton.Name = "HexButton"
+    toggleButton.Size = UDim2.new(0, 50, 0, 50)
+    toggleButton.Position = UDim2.new(0, 20, 0, 20)
+    toggleButton.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    toggleButton.BorderSizePixel = 0
+    toggleButton.Text = "hex"
+    toggleButton.TextColor3 = Color3.fromRGB(255, 230, 0) -- Same yellow as title
+    toggleButton.Font = Enum.Font.GothamBold
+    toggleButton.TextSize = 14
+    toggleButton.ZIndex = 100
+    toggleButton.Parent = screenGui
+    
+    -- Add shadow effect
+    local shadow = Instance.new("ImageLabel")
+    shadow.Name = "Shadow"
+    shadow.Size = UDim2.new(1, 10, 1, 10)
+    shadow.Position = UDim2.new(0, -5, 0, -5)
+    shadow.BackgroundTransparency = 1
+    shadow.Image = "rbxassetid://1316045217"
+    shadow.ImageColor3 = Color3.fromRGB(0, 0, 0)
+    shadow.ImageTransparency = 0.6
+    shadow.ScaleType = Enum.ScaleType.Slice
+    shadow.SliceCenter = Rect.new(10, 10, 118, 118)
+    shadow.ZIndex = 99
+    shadow.Parent = toggleButton
+    
+    -- Make hex button rounded
+    local buttonCorner = Instance.new("UICorner")
+    buttonCorner.CornerRadius = UDim.new(0, 8)
+    buttonCorner.Parent = toggleButton
+    
+    -- Button click handler
+    toggleButton.MouseButton1Click:Connect(function()
+        toggleUI(true)
+    end)
+    
+    -- Make button draggable
+    makeDraggable(toggleButton, toggleButton)
+    
+    return toggleButton
+end
+
+function UICreator.CreateUI()
+    -- Load saved settings if available
+    loadSettings()
+    
+    -- Detect if on mobile
+    local UserInputService = game:GetService("UserInputService")
+    local isMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+    
+    -- Create main GUI if it doesn't exist, otherwise just toggle visibility
+    if not screenGui then
+        screenGui = Instance.new("ScreenGui")
+        screenGui.Name = "CyberCloudGUI"
+        screenGui.IgnoreGuiInset = true
+        screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+        screenGui.ResetOnSpawn = false
+        
+        -- Parent je nach Ausführungsumgebung setzen
+        pcall(function() 
+            screenGui.Parent = game:GetService("CoreGui")
+        end)
+        
+        if not screenGui.Parent then
+            pcall(function()
+                screenGui.Parent = game.Players.LocalPlayer:WaitForChild("PlayerGui")
+            end)
+        end
+        
+        -- Falls beide Methoden fehlschlagen
+        if not screenGui.Parent then
+            pcall(function()
+                if gethui then 
+                    screenGui.Parent = gethui()
+                elseif get_hidden_gui then 
+                    screenGui.Parent = get_hidden_gui()
+                end
+            end)
+        end
+        
+        -- Create toggle button (hex)
+        createToggleButton()
+    end
+    
+    -- Main background (400x600 as requested)
+    local mainFrame = Instance.new("Frame")
+    mainFrame.Name = "MainFrame"
+    mainFrame.Size = UDim2.new(0, 400, 0, 600) -- 400 width, 600 height
+    mainFrame.Position = UDim2.new(0.5, -200, 0.5, -300) -- Center on screen
+    mainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 22)
+    mainFrame.BorderSizePixel = 0
+    mainFrame.ClipsDescendants = true
+    mainFrame.Parent = screenGui
+    
+    -- Round corners
+    local mainCorner = Instance.new("UICorner")
+    mainCorner.CornerRadius = UDim.new(0, 8)
+    mainCorner.Parent = mainFrame
+    
+    -- Top bar for dragging (entire top area including title)
+    local topBar = Instance.new("Frame")
+    topBar.Name = "TopBar"
+    topBar.Size = UDim2.new(1, 0, 0, 40)
+    topBar.Position = UDim2.new(0, 0, 0, 0)
+    topBar.BackgroundTransparency = 1 -- Transparent but draggable
+    topBar.Parent = mainFrame
+    
+    -- Title
+    local titleLabel = Instance.new("TextLabel")
+    titleLabel.Name = "Title"
+    titleLabel.Size = UDim2.new(1, 0, 0, 30)
+    titleLabel.Position = UDim2.new(0, 0, 0, 5)
+    titleLabel.BackgroundTransparency = 1
+    titleLabel.Font = Enum.Font.GothamBold
+    titleLabel.TextSize = 18
+    titleLabel.TextColor3 = Color3.fromRGB(255, 230, 0)
+    titleLabel.Text = "cybercloud."
+    titleLabel.TextXAlignment = Enum.TextXAlignment.Center
+    titleLabel.ZIndex = 10
+    titleLabel.Parent = topBar
+    
+    -- Close button (X)
+    local closeButton = Instance.new("TextButton")
+    closeButton.Name = "CloseButton"
+    closeButton.Size = UDim2.new(0, 30, 0, 30)
+    closeButton.Position = UDim2.new(1, -35, 0, 5)
+    closeButton.BackgroundTransparency = 1
+    closeButton.Text = "X"
+    closeButton.TextColor3 = Color3.fromRGB(200, 200, 200)
+    closeButton.Font = Enum.Font.GothamBold
+    closeButton.TextSize = 18
+    closeButton.ZIndex = 10
+    closeButton.Parent = topBar
+    
+    closeButton.MouseButton1Click:Connect(function()
+        toggleUI(false)
+    end)
+    
+    -- Make UI draggable only from top bar
+    makeDraggable(mainFrame, topBar)
+    
+    -- Create scrolling frame for content (vertical scrolling only)
+    local contentFrame = Instance.new("ScrollingFrame")
+    contentFrame.Name = "ContentFrame"
+    contentFrame.Size = UDim2.new(1, -10, 1, -45) -- Adjust to account for top bar
+    contentFrame.Position = UDim2.new(0, 5, 0, 45) -- Position below top bar
+    contentFrame.BackgroundTransparency = 1
+    contentFrame.BorderSizePixel = 0
+    contentFrame.ScrollBarThickness = 4
+    contentFrame.ScrollBarImageColor3 = Color3.fromRGB(100, 100, 100)
+    contentFrame.BottomImage = "rbxassetid://7445543667"
+    contentFrame.MidImage = "rbxassetid://7445543667"
+    contentFrame.TopImage = "rbxassetid://7445543667"
+    -- Vertical scrolling only
+    contentFrame.CanvasSize = UDim2.new(0, 0, 2, 0) -- Will be adjusted based on content
+    contentFrame.VerticalScrollBarInset = Enum.ScrollBarInset.ScrollBar
+    contentFrame.HorizontalScrollBarInset = Enum.ScrollBarInset.None
+    contentFrame.ScrollingDirection = Enum.ScrollingDirection.Y -- Only allow vertical scrolling
+    contentFrame.ElasticBehavior = Enum.ElasticBehavior.Always
+    contentFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y -- Automatically adjust canvas height
+    contentFrame.Parent = mainFrame
+    
+    -- Content container
+    local contentContainer = Instance.new("Frame")
+    contentContainer.Name = "ContentContainer"
+    contentContainer.Size = UDim2.new(1, 0, 1, 0)
+    contentContainer.BackgroundTransparency = 1
+    contentContainer.Parent = contentFrame
+    
+    -- Left column
+    local leftColumn = Instance.new("Frame")
+    leftColumn.Name = "LeftColumn"
+    leftColumn.Size = UDim2.new(0.5, -5, 0, 1200) -- Tall for a lot of content
+    leftColumn.Position = UDim2.new(0, 5, 0, 0)
+    leftColumn.BackgroundTransparency = 1
+    leftColumn.Parent = contentContainer
+    
+    -- Right column
+    local rightColumn = Instance.new("Frame")
+    rightColumn.Name = "RightColumn"
+    rightColumn.Size = UDim2.new(0.5, -5, 0, 1200) -- Tall for a lot of content
+    rightColumn.Position = UDim2.new(0.5, 0, 0, 0)
+    rightColumn.BackgroundTransparency = 1
+    rightColumn.Parent = contentContainer
+    
+    -- Left column header
+    local leftHeader = Instance.new("TextLabel")
+    leftHeader.Name = "LeftHeader"
+    leftHeader.Size = UDim2.new(1, 0, 0, 25)
+    leftHeader.BackgroundTransparency = 1
+    leftHeader.Font = Enum.Font.GothamSemibold
+    leftHeader.TextSize = 16
+    leftHeader.TextColor3 = Color3.fromRGB(255, 255, 255)
+    leftHeader.Text = "Target Aim"
+    leftHeader.TextXAlignment = Enum.TextXAlignment.Left
+    leftHeader.Parent = leftColumn
+    
+    -- Right column header
+    local rightHeader = Instance.new("TextLabel")
+    rightHeader.Name = "RightHeader"
+    rightHeader.Size = UDim2.new(1, 0, 0, 25)
+    rightHeader.BackgroundTransparency = 1
+    rightHeader.Font = Enum.Font.GothamSemibold
+    rightHeader.TextSize = 16
+    rightHeader.TextColor3 = Color3.fromRGB(255, 255, 255)
+    rightHeader.Text = "Target Aim Visuals"
+    rightHeader.TextXAlignment = Enum.TextXAlignment.Left
+    rightHeader.Parent = rightColumn
+    
+    -- Create items for both columns
+    -- Left column items
+    createToggleItem(leftColumn, "Enabled", 1, settings.toggles["LeftEnabled"] or true, true)
+    createKeybindItem(leftColumn, "Keybind", 2, settings.keybinds["LeftKeybind"] or "E")
+    createToggleItem(leftColumn, "Bullet Tp", 3, settings.toggles["BulletTp"] or false, false)
+    createToggleItem(leftColumn, "Spectate", 4, settings.toggles["Spectate"] or false, false)
+    createToggleItem(leftColumn, "Auto Switch", 5, settings.toggles["AutoSwitch"] or false, false)
+    createToggleItem(leftColumn, "Closest Body Part", 6, settings.toggles["ClosestBodyPart"] or false, false)
+    createToggleItem(leftColumn, "Use All Aim Part", 7, settings.toggles["UseAllAimPart"] or false, true)
+    createToggleItem(leftColumn, "Air Offset", 8, settings.toggles["AirOffset"] or false, true)
+    createToggleItem(leftColumn, "Resolver", 9, settings.toggles["Resolver"] or false, true)
+    createToggleItem(leftColumn, "Checks", 10, settings.toggles["Checks"] or false, true)
+    createToggleItem(leftColumn, "Anti Ground Shots", 11, settings.toggles["AntiGroundShots"] or false, true)
+    createToggleItem(leftColumn, "Field Of View", 12, settings.toggles["FieldOfView"] or false, true)
+    createToggleItem(leftColumn, "OBA", 13, settings.toggles["OBA"] or false, false)
+    createDropdownItem(leftColumn, "Aim Part", 14, settings.dropdowns["AimPart"] or "HumanoidRootPart")
+    
+    -- Right column items
+    createToggleItem(rightColumn, "Enabled", 1, settings.toggles["RightEnabled"] or true, true)
+    createToggleItem(rightColumn, "Line", 2, settings.toggles["Line"] or true, true)
+    createToggleItem(rightColumn, "Dot", 3, settings.toggles["Dot"] or true, true)
+    createToggleItem(rightColumn, "Chams", 4, settings.toggles["Chams"] or true, true)
+    createColorItem(rightColumn, "Line Color", 5, settings.colors["LineColor"] or Color3.fromRGB(255, 255, 0))
+    createColorItem(rightColumn, "Chams Fill Color", 6, settings.colors["ChamsFillColor"] or Color3.fromRGB(255, 255, 0))
+    createColorItem(rightColumn, "Chams Outline Color", 7, settings.colors["ChamsOutlineColor"] or Color3.fromRGB(255, 255, 0))
+    createSliderItem(rightColumn, "Line Thickness", 8, settings.sliders["LineThickness"] or 0.6)
+    
+    createHeaderItem(rightColumn, "Target Aim Teleport", 9)
+    createToggleItem(rightColumn, "Enabled", 10, settings.toggles["TeleportEnabled"] or true, true)
+    createToggleItem(rightColumn, "Bypass Destroy Cheaters", 11, settings.toggles["BypassDestroyCheaters"] or false, false)
+    createKeybindItem(rightColumn, "Keybind", 12, settings.keybinds["RightKeybind"] or "B")
+    createDropdownItem(rightColumn, "Type", 13, settings.dropdowns["Type"] or "Random")
+    
+    -- Calculate maximum Y position of elements in a container
+    local function getMaxPosition(container)
+        local maxPos = 0
+        for _, child in pairs(container:GetChildren()) do
+            if child:IsA("Frame") or child:IsA("TextLabel") then
+                local childBottom = child.Position.Y.Offset + child.Size.Y.Offset
+                if childBottom > maxPos then
+                    maxPos = childBottom
+                end
+            end
+        end
+        return maxPos
+    end
+    
+    -- Berechne die unterste Position der UI-Elemente
+    local leftMaxY = getMaxPosition(leftColumn)
+    local rightMaxY = getMaxPosition(rightColumn)
+    local maxY = math.max(leftMaxY, rightMaxY)
+    
+    -- Save Button hinzufügen unter allen anderen Elementen
+    local saveButton = Instance.new("TextButton")
+    saveButton.Name = "SaveButton"
+    saveButton.Size = UDim2.new(0, 150, 0, 35)
+    saveButton.Position = UDim2.new(0.5, -75, 0, maxY + 20) -- Positionierung unter dem letzten Element
+    saveButton.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    saveButton.BorderSizePixel = 0
+    saveButton.Font = Enum.Font.GothamSemibold
+    saveButton.TextSize = 15
+    saveButton.TextColor3 = Color3.fromRGB(255, 230, 0)
+    saveButton.Text = "Save Settings"
+    saveButton.Parent = contentContainer
+    
+    local saveCorner = Instance.new("UICorner")
+    saveCorner.CornerRadius = UDim.new(0, 6)
+    saveCorner.Parent = saveButton
+    
+    -- Save Button Funktion
+    saveButton.MouseButton1Click:Connect(function()
+        -- Einstellungen sammeln und speichern
+        local function collectCurrentSettings()
+            -- Sammelt alle Einstellungen aus den UI-Elementen
+            for _, column in pairs({leftColumn, rightColumn}) do
+                for _, item in pairs(column:GetChildren()) do
+                    if item:IsA("Frame") and item.Name:match("Item$") then
+                        local name = string.gsub(item.Name, "Item$", "")
+                        
+                        -- Toggle-Einstellungen sammeln
+                        local toggleFrame = item:FindFirstChild("ToggleFrame")
+                        if toggleFrame then
+                            local indicator = toggleFrame:FindFirstChild("Indicator")
+                            if indicator then
+                                settings.toggles[name] = indicator.Visible
+                            end
+                        end
+                        
+                        -- Slider-Einstellungen sammeln
+                        local sliderBg = item:FindFirstChild("SliderBackground")
+                        if sliderBg then
+                            local sliderFill = sliderBg:FindFirstChild("SliderFill")
+                            if sliderFill then
+                                settings.sliders[name] = sliderFill.Size.X.Scale
+                            end
+                        end
+                        
+                        -- Farb-Einstellungen sammeln
+                        local colorFrame = item:FindFirstChild("ColorFrame")
+                        if colorFrame then
+                            settings.colors[name] = {
+                                R = colorFrame.BackgroundColor3.R,
+                                G = colorFrame.BackgroundColor3.G,
+                                B = colorFrame.BackgroundColor3.B
+                            }
+                        end
+                        
+                        -- Keybind-Einstellungen sammeln
+                        local keyButton = item:FindFirstChild("KeyButton")
+                        if keyButton then
+                            settings.keybinds[name] = keyButton.Text
+                        end
+                        
+                        -- Dropdown-Einstellungen sammeln
+                        local dropdownButton = item:FindFirstChild("DropdownButton")
+                        if dropdownButton then
+                            settings.dropdowns[name] = dropdownButton.Text
+                        end
+                    end
+                end
+            end
+        end
+        
+        collectCurrentSettings()
+        local success = saveSettings()
+        
+        -- Visuelles Feedback für die Speicherung
+        saveButton.Text = "Saved!"
+        wait(1)
+        saveButton.Text = "Save Settings"
+    end)
+    
+    -- Update canvas size based on content to include Save button
+    contentFrame.CanvasSize = UDim2.new(0, 0, 0, maxY + 75) -- Genug Platz für Button + Abstand
+    
+    -- Mobile-specific adjustments
+    if isMobile then
+        -- Make UI elements bigger for better touch interaction
+        mainFrame.Size = UDim2.new(0.8, 0, 0.8, 0)
+        mainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+        mainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+        
+        -- Increase scroll bar thickness for easier mobile interaction
+        contentFrame.ScrollBarThickness = 8
+    end
+    
+    -- Auto-save settings every 1 second
+    spawn(function()
+        while true do
+            wait(1) -- Speichert jede Sekunde
+            
+            -- Sammle die aktuellen Einstellungen
+            local function collectCurrentSettings()
+                -- Sammelt alle Einstellungen aus den UI-Elementen
+                for _, column in pairs({leftColumn, rightColumn}) do
+                    for _, item in pairs(column:GetChildren()) do
+                        if item:IsA("Frame") and item.Name:match("Item$") then
+                            local name = string.gsub(item.Name, "Item$", "")
+                            
+                            -- Toggle-Einstellungen sammeln
+                            local toggleFrame = item:FindFirstChild("ToggleFrame")
+                            if toggleFrame then
+                                local indicator = toggleFrame:FindFirstChild("Indicator")
+                                if indicator then
+                                    settings.toggles[name] = indicator.Visible
+                                end
+                            end
+                            
+                            -- Slider-Einstellungen sammeln
+                            local sliderBg = item:FindFirstChild("SliderBackground")
+                            if sliderBg then
+                                local sliderFill = sliderBg:FindFirstChild("SliderFill")
+                                if sliderFill then
+                                    settings.sliders[name] = sliderFill.Size.X.Scale
+                                end
+                            end
+                            
+                            -- Farb-Einstellungen sammeln
+                            local colorFrame = item:FindFirstChild("ColorFrame")
+                            if colorFrame then
+                                settings.colors[name] = {
+                                    R = colorFrame.BackgroundColor3.R,
+                                    G = colorFrame.BackgroundColor3.G,
+                                    B = colorFrame.BackgroundColor3.B
+                                }
+                            end
+                            
+                            -- Keybind-Einstellungen sammeln
+                            local keyButton = item:FindFirstChild("KeyButton")
+                            if keyButton then
+                                settings.keybinds[name] = keyButton.Text
+                            end
+                            
+                            -- Dropdown-Einstellungen sammeln
+                            local dropdownButton = item:FindFirstChild("DropdownButton")
+                            if dropdownButton then
+                                settings.dropdowns[name] = dropdownButton.Text
+                            end
+                        end
+                    end
+                end
+            end
+            
+            collectCurrentSettings()
+            saveSettings()
+        end
+    end)
+    
+    return screenGui
+end
+
+-- Create and show the UI
+UICreator.CreateUI()
+
+-- Initial setup - Main UI visible, hex button hidden
+if screenGui then
+    local hexButton = screenGui:FindFirstChild("HexButton")
+    if hexButton then
+        hexButton.Visible = false
+    end
+end
+
+return UICreator
